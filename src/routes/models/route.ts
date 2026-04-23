@@ -13,19 +13,40 @@ modelRoutes.get("/", async (c) => {
       await cacheModels()
     }
 
-    const models = state.models?.data.map((model) => ({
+    const openaiModels = state.models?.data.map((model) => ({
       id: model.id,
       object: "model",
       type: "model",
-      created: 0, // No date available from source
-      created_at: new Date(0).toISOString(), // No date available from source
+      created: 0,
+      created_at: new Date(0).toISOString(),
       owned_by: model.vendor,
       display_name: model.name,
     }))
 
+    const codexModels = state.models?.data.map((model) => ({
+      slug: model.id,
+      display_name: model.name,
+      description: "",
+      default_reasoning_level: "medium",
+      supported_reasoning_levels: [
+        { effort: "low", description: "Fast responses" },
+        { effort: "medium", description: "Balanced" },
+        { effort: "high", description: "Deep reasoning" },
+        { effort: "xhigh", description: "Maximum reasoning" },
+      ],
+      shell_type: "shell_command",
+      visibility: "list",
+      supported_in_api: true,
+      priority: 0,
+      additional_speed_tiers: [],
+      availability_nux: null,
+      upgrade: null,
+    }))
+
     return c.json({
       object: "list",
-      data: models,
+      data: openaiModels,
+      models: codexModels,
       has_more: false,
     })
   } catch (error) {

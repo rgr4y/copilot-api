@@ -3,7 +3,6 @@
 import { defineCommand } from "citty"
 import clipboard from "clipboardy"
 import consola from "consola"
-import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
 import { ensurePaths } from "./lib/paths"
@@ -12,6 +11,11 @@ import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
 import { setupCopilotToken, setupGitHubToken } from "./lib/token"
 import { cacheModels, cacheVSCodeVersion } from "./lib/utils"
+import {
+  handleResponsesWsUpgrade,
+  isResponsesWsPath,
+  responsesWebSocket,
+} from "./routes/responses/ws-proxy"
 import { server } from "./server"
 
 interface RunServerOptions {
@@ -114,10 +118,23 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `🌐 Usage Viewer: https://ericc-ch.github.io/copilot-api?endpoint=${serverUrl}/usage`,
   )
 
-  serve({
-    fetch: server.fetch as ServerHandler,
+  const bunServer = Bun.serve({
     port: options.port,
+    fetch(req, bunSrv) {
+      if (
+        req.headers.get("upgrade")?.toLowerCase() === "websocket" &&
+        isResponsesWsPath(req.url)
+      ) {
+        const ok = handleResponsesWsUpgrade(req, bunSrv)
+        if (ok) return undefined as any
+        return new Response("WebSocket upgrade failed", { status: 500 })
+      }
+      return server.fetch(req)
+    },
+    websocket: responsesWebSocket,
   })
+
+  consola.info(`Listening on: http://localhost:${bunServer.port}/`)
 }
 
 export const start = defineCommand({
