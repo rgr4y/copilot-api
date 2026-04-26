@@ -1606,18 +1606,44 @@ async function runServer(options) {
 		}
 	}
 	consola.box(`🌐 Usage Viewer: https://ericc-ch.github.io/copilot-api?endpoint=${serverUrl}/usage`);
-	const bunServer = Bun.serve({
-		port: options.port,
-		fetch(req, bunSrv) {
-			if (req.headers.get("upgrade")?.toLowerCase() === "websocket" && isResponsesWsPath(req.url)) {
-				if (handleResponsesWsUpgrade(req, bunSrv)) return void 0;
-				return new Response("WebSocket upgrade failed", { status: 500 });
-			}
-			return server.fetch(req);
-		},
-		websocket: responsesWebSocket
-	});
-	consola.info(`Listening on: http://localhost:${bunServer.port}/`);
+	if (typeof Bun !== "undefined") {
+		const bunServer = Bun.serve({
+			port: options.port,
+			fetch(req, bunSrv) {
+				if (req.headers.get("upgrade")?.toLowerCase() === "websocket" && isResponsesWsPath(req.url)) {
+					if (handleResponsesWsUpgrade(req, bunSrv)) return void 0;
+					return new Response("WebSocket upgrade failed", { status: 500 });
+				}
+				return server.fetch(req);
+			},
+			websocket: responsesWebSocket
+		});
+		consola.info(`Listening on: http://localhost:${bunServer.port}/`);
+	} else {
+		const { createServer } = await import("node:http");
+		createServer(async (req, res) => {
+			const url = `http://localhost:${options.port}${req.url}`;
+			const headers = new Headers();
+			for (const [key, val] of Object.entries(req.headers)) if (val) headers.set(key, Array.isArray(val) ? val.join(", ") : val);
+			const body = await new Promise((resolve) => {
+				const chunks = [];
+				req.on("data", (c) => chunks.push(c));
+				req.on("end", () => resolve(Buffer.concat(chunks)));
+			});
+			const request = new Request(url, {
+				method: req.method,
+				headers,
+				body: ["GET", "HEAD"].includes(req.method ?? "GET") ? void 0 : body
+			});
+			const response = await server.fetch(request);
+			res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+			const buf = Buffer.from(await response.arrayBuffer());
+			res.end(buf);
+		}).listen(options.port, () => {
+			consola.info(`Listening on: http://localhost:${options.port}/`);
+		});
+		consola.warn("WebSocket support requires Bun runtime");
+	}
 }
 const start = defineCommand({
 	meta: {

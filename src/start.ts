@@ -118,23 +118,53 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `🌐 Usage Viewer: https://ericc-ch.github.io/copilot-api?endpoint=${serverUrl}/usage`,
   )
 
-  const bunServer = Bun.serve({
-    port: options.port,
-    fetch(req, bunSrv) {
-      if (
-        req.headers.get("upgrade")?.toLowerCase() === "websocket" &&
-        isResponsesWsPath(req.url)
-      ) {
-        const ok = handleResponsesWsUpgrade(req, bunSrv)
-        if (ok) return undefined as any
-        return new Response("WebSocket upgrade failed", { status: 500 })
-      }
-      return server.fetch(req)
-    },
-    websocket: responsesWebSocket,
-  })
+  const isBun = typeof Bun !== "undefined"
 
-  consola.info(`Listening on: http://localhost:${bunServer.port}/`)
+  if (isBun) {
+    const bunServer = Bun.serve({
+      port: options.port,
+      fetch(req: Request, bunSrv: any) {
+        if (
+          req.headers.get("upgrade")?.toLowerCase() === "websocket" &&
+          isResponsesWsPath(req.url)
+        ) {
+          const ok = handleResponsesWsUpgrade(req, bunSrv)
+          if (ok) return undefined as any
+          return new Response("WebSocket upgrade failed", { status: 500 })
+        }
+        return server.fetch(req)
+      },
+      websocket: responsesWebSocket,
+    })
+    consola.info(`Listening on: http://localhost:${bunServer.port}/`)
+  } else {
+    const { createServer } = await import("node:http")
+    const nodeServer = createServer(async (req, res) => {
+      const url = `http://localhost:${options.port}${req.url}`
+      const headers = new Headers()
+      for (const [key, val] of Object.entries(req.headers)) {
+        if (val) headers.set(key, Array.isArray(val) ? val.join(", ") : val)
+      }
+      const body = await new Promise<Buffer>((resolve) => {
+        const chunks: Buffer[] = []
+        req.on("data", (c: Buffer) => chunks.push(c))
+        req.on("end", () => resolve(Buffer.concat(chunks)))
+      })
+      const request = new Request(url, {
+        method: req.method,
+        headers,
+        body: ["GET", "HEAD"].includes(req.method ?? "GET") ? undefined : body,
+      })
+      const response = await server.fetch(request)
+      res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
+      const buf = Buffer.from(await response.arrayBuffer())
+      res.end(buf)
+    })
+    nodeServer.listen(options.port, () => {
+      consola.info(`Listening on: http://localhost:${options.port}/`)
+    })
+    consola.warn("WebSocket support requires Bun runtime")
+  }
 }
 
 export const start = defineCommand({
