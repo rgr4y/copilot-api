@@ -9,6 +9,3 @@ node_modules/
 
 # eslint cache
 .eslintcache
-
-# build output
-dist/
